@@ -30,6 +30,11 @@
 #include "Management.h"
 #include "Game.h"
 
+#if defined(LEELA_GTP)
+#include <QTime>
+
+#define NODE_JS_SERVER_IP "192.168.1.100:8080"
+#endif
 
 constexpr int RETRY_DELAY_MIN_SEC = 30;
 constexpr int RETRY_DELAY_MAX_SEC = 60 * 60;  // 1 hour
@@ -43,6 +48,12 @@ Management::Management(const int gpus,
                        const int maxGames,
                        const bool delNetworks,
                        const QString& keep,
+#if defined(LEELA_GTP)
+                       GtpConfigElements *config,
+#ifdef WIN32
+                       const QString& app_path,
+#endif  // ifdef WIN32
+#endif  // if defined(LEELA_GTP)
                        const QString& debug)
 
     : m_syncMutex(),
@@ -54,6 +65,13 @@ Management::Management(const int gpus,
     m_matchGames(0),
     m_gamesPlayed(0),
     m_keepPath(keep),
+#if defined(LEELA_GTP)
+    m_termerr(0),
+    m_config(config),
+#ifdef WIN32
+    m_app_path_(app_path),
+#endif  // ifdef WIN32
+#endif  // if defined(LEELA_GTP)
     m_debugPath(debug),
     m_version(ver),
     m_fallBack(Order::Error),
@@ -87,16 +105,38 @@ Order Management::getWork(const QFileInfo &file) {
     return o;
 }
 
+#if defined(LEELA_GTP)
+Job *Management::giveAssignments() {
+#else
 void Management::giveAssignments() {
     sendAllGames();
+#endif
 
     //Make the OpenCl tuning before starting the threads
     QTextStream(stdout) << "Starting tuning process, please wait..." << endl;
 
+#if defined(LEELA_GTP)
+    QString tuneCmdLine("./leelaz --tune-only ");
+
+    /*
+    if (m_config->enable_noise)
+        tuneCmdLine.append("-n ");
+    if (!m_config->heuristic)
+        tuneCmdLine.append("--dumbpass ");
+    if (m_config->random_num > 0)
+        tuneCmdLine.append("-m " + QString::number(m_config->random_num) + " ");
+    */
+
+    tuneCmdLine.append("-w " + m_config->net_filepath);
+
+    tuneCmdLine.append(" " + m_config->extral_lzparam + " ");
+#else
     Order tuneOrder = getWork(true);
     QString tuneCmdLine("./leelaz --tune-only -w networks/");
     tuneCmdLine.append(tuneOrder.parameters()["network"]);
+#endif
     if (m_gpusList.isEmpty()) {
+        QTextStream(stdout) << "--gpulist isempty...\n";
         runTuningProcess(tuneCmdLine);
     } else {
         for (auto i = 0; i < m_gpusList.size(); ++i) {
@@ -107,6 +147,9 @@ void Management::giveAssignments() {
 
     m_start = std::chrono::high_resolution_clock::now();
     QString myGpu;
+#if defined(LEELA_GTP)
+    Job *j = nullptr;
+#endif
     for (int gpu = 0; gpu < m_gpus; ++gpu) {
         for (int game = 0; game < m_games; ++game) {
             int thread_index = gpu * m_games + game;
@@ -127,11 +170,46 @@ void Management::giveAssignments() {
             if (!finfo.fileName().isEmpty()) {
                 m_gamesThreads[thread_index]->order(getWork(finfo));
             } else {
+#if defined(LEELA_GTP)
+                QMap<QString, QString> t;
+                QString options;
+                if (m_config->enable_noise)
+                    options.append(" -n");
+                if (m_config->random_num > 0) {
+                    qsrand(QTime(0, 0, 0).secsTo(QTime::currentTime()));
+                    options.append(" -s " + QString::number(qrand()));
+                }
+                if (!m_config->heuristic)
+                    options.append(" --dumbpass");
+                if (m_config->random_num > 0)
+                    options.append(" -m " + QString::number(m_config->random_num));
+                options.append(" -v " + QString::number(m_config->loop_visits));
+                options.append(" -r " + QString::number(m_config->resignation_percent));
+                options.append(" -t 1 --noponder");
+                QTextStream(stdout) << "options: " << options << "\n";
+                t["leelazVer"] = "0.15";
+                t["rndSeed"] = "";
+                t["optHash"] = "ee21";
+                t["options"] = options;
+                t["debug"] = "false";
+                t["network"] = m_config->net_file;
+                Order o(Order::Production, t);
+                m_gamesThreads[thread_index]->order(o);
+#else
                 m_gamesThreads[thread_index]->order(getWork());
+#endif
             }
             m_gamesThreads[thread_index]->start();
+#if defined(LEELA_GTP)
+            if (j == nullptr)
+                j = m_gamesThreads[thread_index]->getJob();
+#endif
         }
     }
+#if defined(LEELA_GTP)
+    j->should_sendmsg();
+    return j;
+#endif
 }
 
 void Management::storeGames() {
@@ -149,31 +227,64 @@ void Management::wait() {
     }
 }
 
+#if defined(LEELA_GTP)
+bool Management::terminate_leelaz() {
+    storeGames();
+    if (m_termerr) {
+        return true;
+    }
+
+    return false;
+}
+#endif
+
 void Management::getResult(Order ord, Result res, int index, int duration) {
     if (res.type() == Result::Error) {
+#if defined(LEELA_GTP)
+        QTextStream(stdout) << "before sendquit in getreult\n";
+        m_termerr = Result::Error;
+        sendQuit();
+        return;
+#else
         exit(1);
+#endif
     }
     m_syncMutex.lock();
     m_gamesPlayed++;
     switch (res.type()) {
     case Result::File:
+#if defined(LEELA_GTP)
+        m_selfGames++;
+        archiveFiles(res.parameters()["file"]);
+        cleanupFiles(res.parameters()["file"]);
+#else
         m_selfGames++,
         uploadData(res.parameters(), ord.parameters());
+#endif
         printTimingInfo(duration);
         break;
     case Result::Win:
     case Result::Loss:
+#if defined(LEELA_GTP)
+        m_matchGames++;
+        archiveFiles(res.parameters()["file"]);
+        cleanupFiles(res.parameters()["file"]);
+#else
         m_matchGames++,
         uploadResult(res.parameters(), ord.parameters());
+#endif
         printTimingInfo(duration);
         break;
     }
+#if !defined(LEELA_GTP)
     sendAllGames();
+#endif
     if (m_gamesLeft == 0) {
         m_gamesThreads[index]->doFinish();
         if (m_threadsLeft > 1) {
             --m_threadsLeft;
         } else {
+            QTextStream(stdout) << "before sendquit in if gamesleft 0\n";
             sendQuit();
         }
     } else {
@@ -182,7 +293,34 @@ void Management::getResult(Order ord, Result res, int index, int duration) {
         if (!finfo.fileName().isEmpty()) {
             m_gamesThreads[index]->order(getWork(finfo));
         } else {
+#if defined(LEELA_GTP)
+            QMap<QString, QString> t;
+            QString options;
+            if (m_config->enable_noise)
+                options.append(" -n");
+            if (m_config->random_num > 0) {
+                qsrand(QTime(0, 0, 0).secsTo(QTime::currentTime()));
+                options.append(" -s " + QString::number(qrand()));
+            }
+            if (!m_config->heuristic)
+                options.append(" --dumbpass");
+            if (m_config->random_num > 0)
+                options.append(" -m " + QString::number(m_config->random_num));
+            options.append(" -v " + QString::number(m_config->loop_visits));
+            options.append(" -r " + QString::number(m_config->resignation_percent));
+            options.append(" -t 1 --noponder");
+            QTextStream(stdout) << "options: " << options << "\n";
+            t["leelazVer"] = "0.15";
+            t["rndSeed"] = "";
+            t["optHash"] = "ee21";
+            t["options"] = options;
+            t["debug"] = "false";
+            t["network"] = m_config->net_file;
+            Order o(Order::Production, t);
+            m_gamesThreads[index]->order(o);
+#else
             m_gamesThreads[index]->order(getWork());
+#endif
         }
     }
     m_syncMutex.unlock();
@@ -261,6 +399,7 @@ QString Management::getOptionsString(const QJsonObject &opt, const QString &rnd)
     if (rnd != "") {
         options.append(" -s " + rnd + " ");
     }
+    QTextStream(stdout) << "options: " <<  options << "\n";
     return options;
 }
 
@@ -311,7 +450,11 @@ Order Management::getWorkInternal(bool tuning) {
     prog_cmdline.append(".exe");
 #endif
     prog_cmdline.append(" -s -J");
+#if defined(LEELA_GTP)
+    prog_cmdline.append(" http://" NODE_JS_SERVER_IP "/get-task/");
+#else
     prog_cmdline.append(" http://zero.sjeng.org/get-task/");
+#endif
     if (tuning) {
         prog_cmdline.append("0");
     } else {
@@ -500,6 +643,7 @@ bool Management::networkExists(const QString &name) {
 
 void Management::fetchNetwork(const QString &net) {
     QString name = "networks/" + net;
+    QTextStream(stdout) << "fetchNetwork, name: " << name << endl;
     if (networkExists(name)) {
         return;
     }
@@ -518,7 +662,12 @@ void Management::fetchNetwork(const QString &net) {
     // Use the filename from the server.
     prog_cmdline.append(" -s -J -o " + name + ".gz ");
     prog_cmdline.append(" -w %{filename_effective}");
+#if defined(LEELA_GTP)
+    prog_cmdline.append(" http://" NODE_JS_SERVER_IP "/" + name + ".gz");
+    QTextStream(stdout) << "fetchNetwork, prog_cmdline: " << prog_cmdline << endl;
+#else
     prog_cmdline.append(" http://zero.sjeng.org/" + name + ".gz");
+#endif
 
     QProcess curl;
     curl.start(prog_cmdline);
@@ -581,10 +730,18 @@ void Management::cleanupFiles(const QString &fileName) {
 }
 
 void Management::gzipFile(const QString &fileName) {
+#if defined(LEELA_GTP)
+#ifdef WIN32
+    QString gzipCmd = m_app_path_ + "gzip.exe";
+#else
+    QString gzipCmd ="gzip";
+#endif
+#else  // if defined(LEELA_GTP)
     QString gzipCmd ="gzip";
 #ifdef WIN32
     gzipCmd.append(".exe");
 #endif
+#endif  // if defined(LEELA_GTP)
     gzipCmd.append(" " + fileName);
     QProcess::execute(gzipCmd);
 }
@@ -673,6 +830,7 @@ bool Management::sendCurl(const QStringList &lines) {
         ++it;
     }
     QProcess curl;
+    QTextStream(stdout) << "sendCurl, prog_cmdline: " << prog_cmdline << endl;
     curl.start(prog_cmdline);
     curl.waitForFinished(-1);
     if (curl.exitCode()) {
@@ -720,7 +878,11 @@ void Management::uploadResult(const QMap<QString,QString> &r, const QMap<QString
     prog_cmdline.append("-F options_hash="+ l["optHash"]);
     prog_cmdline.append("-F random_seed="+ l["rndSeed"]);
     prog_cmdline.append("-F sgf=@"+ r["file"] + ".sgf.gz");
+#if defined(LEELA_GTP)
+    prog_cmdline.append("http://" NODE_JS_SERVER_IP "/submit-match");
+#else
     prog_cmdline.append("http://zero.sjeng.org/submit-match");
+#endif
 
     bool sent = false;
     for (auto retries = 0; retries < MAX_RETRIES; retries++) {
@@ -772,7 +934,11 @@ void Management::uploadData(const QMap<QString,QString> &r, const QMap<QString,Q
     prog_cmdline.append("-F random_seed="+ l["rndSeed"]);
     prog_cmdline.append("-F sgf=@" + r["file"] + ".sgf.gz");
     prog_cmdline.append("-F trainingdata=@" + r["file"] + ".txt.0.gz");
+#if defined(LEELA_GTP)
+    prog_cmdline.append("http://" NODE_JS_SERVER_IP "/submit");
+#else
     prog_cmdline.append("http://zero.sjeng.org/submit");
+#endif
 
     bool sent = false;
     for (auto retries = 0; retries < MAX_RETRIES; retries++) {

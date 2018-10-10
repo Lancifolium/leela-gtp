@@ -17,6 +17,15 @@
     along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#if defined(LEELA_GTP)
+#include "LeelaGTP/LeelaGTP.h"
+int main(int argc, char *argv[]) {
+    QApplication a(argc, argv);
+    LeelaGTP w(&a);
+    w.show();
+    return a.exec();
+}
+#else
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTimer>
 #include <QtCore/QTextStream>
@@ -159,3 +168,4 @@ int main(int argc, char *argv[]) {
     }
     return app.exec();
 }
+#endif

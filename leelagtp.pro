@@ -10,20 +10,21 @@ equals(QT_MAJOR_VERSION, $$QT_REQ_MAJOR_VERSION):lessThan(QT_MINOR_VERSION, $$QT
 }
 
 
-TARGET = autogtp
+QT       += core gui widgets
+TARGET   = leelagtp
 CONFIG   += c++14
-CONFIG   += warn_on
-CONFIG   += console
-CONFIG   -= app_bundle
+RC_FILE  += leelagtp.rc
 
 TEMPLATE = app
 
-SOURCES += main.cpp \
-    Game.cpp \
+SOURCES += Game.cpp \
     Worker.cpp \
     Order.cpp \
     Job.cpp \
-    Management.cpp
+    Management.cpp \
+    LeelaGTP.cpp \
+    MovLancifolium.cpp \
+    GTPConfig.cpp
 
 HEADERS += \
     Game.h \
@@ -32,4 +33,12 @@ HEADERS += \
     Order.h \
     Result.h \
     Management.h \
-    Console.h
+    LeelaGTP.h \
+    MovLancifolium.h \
+    GTPConfig.h
+
+DISTFILES += \
+    leelagtp.rc
+
+RESOURCES += \
+    leelagtp.qrc

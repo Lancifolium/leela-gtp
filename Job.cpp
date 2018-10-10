@@ -29,7 +29,8 @@ Job::Job(QString gpu, Management *parent) :
     m_state(RUNNING),
     m_option(""),
   m_gpu(gpu),
-  m_boss(parent)
+  m_boss(parent),
+  m_should_sendmsg(false)
 {
 }
 
@@ -67,8 +68,10 @@ Job(gpu, parent)
 
 Result ProductionJob::execute(){
     Result res(Result::Error);
-    Game game("networks/" + m_network, m_option);
+    Game game(m_boss->gtp_config()->net_filepath, m_option);
+    //Game game("networks/" + m_network, m_option);
     if (!game.gameStart(m_leelazMinVersion)) {
+        QTextStream(stdout) << "before return res in projub\n";
         return res;
     }
     if (!m_sgf.isEmpty()) {
@@ -78,12 +81,19 @@ Result ProductionJob::execute(){
         QFile::remove(m_sgf + ".sgf");
         QFile::remove(m_sgf + ".train");
     }
+    if (m_should_sendmsg) {
+        emit sendmessage(100000); // init
+    }
     do {
         game.move();
         if (!game.waitForMove()) {
             return res;
         }
-        game.readMove();
+        if (m_should_sendmsg) {
+            emit sendmessage(game.readMove());
+        } else {
+            game.readMove();
+        }
         m_boss->incMoves();
     } while (game.nextMove() && m_state.load() == RUNNING);
     switch (m_state.load()) {
@@ -131,7 +141,7 @@ void ProductionJob::init(const Order &o) {
 
 Result ValidationJob::execute(){
     Result res(Result::Error);
-    Game first("networks/" + m_firstNet,  m_option);
+    Game first(m_boss->gtp_config()->net_filepath,  m_option);
     if (!first.gameStart(m_leelazMinVersion)) {
         return res;
     }
@@ -140,7 +150,7 @@ Result ValidationJob::execute(){
         first.setMovesCount(m_moves);
         QFile::remove(m_sgfFirst + ".sgf");
     }
-    Game second("networks/" + m_secondNet, m_option);
+    Game second(m_boss->gtp_config()->net_component_filepath, m_option);
     if (!second.gameStart(m_leelazMinVersion)) {
         return res;
     }

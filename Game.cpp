@@ -20,18 +20,20 @@
 #include <QFile>
 #include <QTextStream>
 #include <QRegularExpression>
+#include <QDir>
 #include "Game.h"
 
-Game::Game(const QString& weights, const QString& opt, const QString& binary) :
+Game::Game(const QString& weights, const QString& opt, const QString& binary, const QString& trainpath) :
     QProcess(),
     m_cmdLine(""),
     m_binary(binary),
     m_timeSettings("time_settings 0 1 0"),
     m_resignation(false),
-    m_blackToMove(true),
+    m_blackToMove(false),
     m_blackResigned(false),
     m_passes(0),
-    m_moveNum(0)
+    m_moveNum(0),
+    m_traindatapath(trainpath)
 {
 #ifdef WIN32
     m_binary.append(".exe");
@@ -95,7 +97,7 @@ bool Game::sendGtpCommand(QString cmd) {
         return false;
     }
     char readBuffer[256];
-    int readCount = readLine(readBuffer, 256);
+    auto readCount = readLine(readBuffer, 256);
     if (readCount <= 0 || readBuffer[0] != '=') {
         QTextStream(stdout) << "GTP: " << readBuffer << endl;
         error(Game::WRONG_GTP);
@@ -113,10 +115,11 @@ void Game::checkVersion(const VersionTuple &min_version) {
     waitForBytesWritten(-1);
     if (!waitReady()) {
         error(Game::LAUNCH_FAILURE);
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
+        return;
     }
     char readBuffer[256];
-    int readCount = readLine(readBuffer, 256);
+    auto readCount = readLine(readBuffer, 256);
     //If it is a GTP comment just print it and wait for the real answer
     //this happens with the winogard tuning
     if (readBuffer[0] == '#') {
@@ -124,7 +127,8 @@ void Game::checkVersion(const VersionTuple &min_version) {
         QTextStream(stdout) << readBuffer << endl;
         if (!waitReady()) {
             error(Game::PROCESS_DIED);
-            exit(EXIT_FAILURE);
+            //exit(EXIT_FAILURE);
+            return;
         }
         readCount = readLine(readBuffer, 256);
     }
@@ -132,7 +136,8 @@ void Game::checkVersion(const VersionTuple &min_version) {
     if (readCount <= 3 || readBuffer[0] != '=') {
         QTextStream(stdout) << "GTP: " << readBuffer << endl;
         error(Game::WRONG_GTP);
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
+        return;
     }
     QString version_buff(&readBuffer[2]);
     version_buff = version_buff.simplified();
@@ -140,7 +145,8 @@ void Game::checkVersion(const VersionTuple &min_version) {
     if (version_list.size() < 2) {
         QTextStream(stdout)
             << "Unexpected Leela Zero version: " << version_buff << endl;
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
+        return;
     }
     if (version_list.size() < 3) {
         version_list.append("0");
@@ -157,11 +163,13 @@ void Game::checkVersion(const VersionTuple &min_version) {
             << std::get<2>(min_version)  << endl;
         QTextStream(stdout)
             << "Check https://github.com/gcp/leela-zero for updates." << endl;
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
+        return;
     }
     if (!eatNewLine()) {
         error(Game::WRONG_GTP);
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -176,6 +184,16 @@ bool Game::gameStart(const VersionTuple &min_version) {
     checkVersion(min_version);
     QTextStream(stdout) << "Engine has started." << endl;
     sendGtpCommand(m_timeSettings);
+
+    QDir dir(m_traindatapath);
+    QStringList trainfilter;
+    trainfilter << "*.0.gz" << "*.train";
+    QStringList trainfiles = dir.entryList(trainfilter, QDir::Files | QDir::Readable, QDir::Name);
+    for (int tmpi = 0; tmpi < trainfiles.size(); tmpi++) {
+        sendGtpCommand(qPrintable("load_training " + m_traindatapath + trainfiles[tmpi]));
+        //QTextStream(stdout) << m_traindatapath + trainfiles[tmpi] << "\n";
+    }
+    QTextStream(stdout) << "load " << trainfiles.size() << " training files\n";
     QTextStream(stdout) << "Infinite thinking time set." << endl;
     return true;
 }
@@ -208,15 +226,15 @@ bool Game::waitReady() {
     return true;
 }
 
-bool Game::readMove() {
+int Game::readMove() {
     char readBuffer[256];
-    int readCount = readLine(readBuffer, 256);
+    auto readCount = readLine(readBuffer, 256);
     if (readCount <= 3 || readBuffer[0] != '=') {
         error(Game::WRONG_GTP);
         QTextStream(stdout) << "Error read " << readCount << " '";
         QTextStream(stdout) << readBuffer << "'" << endl;
         terminate();
-        return false;
+        return 0;
     }
     // Skip "= "
     m_moveDone = readBuffer;
@@ -224,7 +242,7 @@ bool Game::readMove() {
     m_moveDone = m_moveDone.simplified();
     if (!eatNewLine()) {
         error(Game::PROCESS_DIED);
-        return false;
+        return 0;
     }
     if (readCount == 0) {
         error(Game::WRONG_GTP);
@@ -232,17 +250,40 @@ bool Game::readMove() {
     QTextStream(stdout) << m_moveNum << " (";
     QTextStream(stdout) << (m_blackToMove ? "B " : "W ") << m_moveDone << ") ";
     QTextStream(stdout).flush();
+    int ret = 0;
     if (m_moveDone.compare(QStringLiteral("pass"),
                           Qt::CaseInsensitive) == 0) {
         m_passes++;
+        ret = 200000; // means pass
+        if (m_blackToMove)
+            ret += 10000;
+        else
+            ret += 20000;
     } else if (m_moveDone.compare(QStringLiteral("resign"),
                                  Qt::CaseInsensitive) == 0) {
         m_resignation = true;
         m_blackResigned = m_blackToMove;
+        ret = 300000;
+        if (m_blackResigned)
+            ret += 10000;
+        else
+            ret += 20000;
     } else {
         m_passes = 0;
+        if (m_blackToMove)
+            ret = 10000;
+        else
+            ret = 20000;
+        ret += (m_moveDone.toLatin1().data()[0] - 'A') * 100;
+        if (m_moveDone.toLatin1().data()[0] > 'I')
+            ret -= 100;
+        if (m_moveDone.length() == 3)
+            ret += (m_moveDone.toLatin1().data()[1] - '0') * 10
+                    + m_moveDone.toLatin1().data()[2] - '1';
+        else
+            ret += m_moveDone.toLatin1().data()[1] - '1';
     }
-    return true;
+    return ret;
 }
 
 bool Game::setMove(const QString& m) {

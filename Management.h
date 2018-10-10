@@ -29,6 +29,7 @@
 #include <chrono>
 #include <stdexcept>
 #include "Worker.h"
+#include "GTPConfig.h"
 
 constexpr int AUTOGTP_VERSION = 16;
 
@@ -42,11 +43,17 @@ public:
                const int maxGame,
                const bool delNetworks,
                const QString& keep,
-               const QString& debug);
+#ifdef WIN32
+               const QString& app_path,
+#endif
+               const QString& debug,
+               GtpConfigElements *config);
     ~Management() = default;
-    void giveAssignments();
+    Job *giveAssignments();
     void incMoves() { m_movesMade++; }
     void wait();
+    bool terminate_leelaz();
+    GtpConfigElements *gtp_config() { return m_config; };
 signals:
     void sendQuit();
 public slots:
@@ -82,6 +89,11 @@ private:
     int m_threadsLeft;
     bool m_delNetworks;
     QLockFile *m_lockFile;
+    int m_termerr;
+    GtpConfigElements *m_config;
+#ifdef WIN32
+    QString m_app_path_;
+#endif
 
     Order getWorkInternal(bool tuning);
     Order getWork(bool tuning = false);

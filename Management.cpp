@@ -30,6 +30,8 @@
 #include "Management.h"
 #include "Game.h"
 
+#define NODE_JS_SERVER_IP "192.168.1.100:8080"
+
 
 constexpr int RETRY_DELAY_MIN_SEC = 30;
 constexpr int RETRY_DELAY_MAX_SEC = 60 * 60;  // 1 hour
@@ -43,7 +45,11 @@ Management::Management(const int gpus,
                        const int maxGames,
                        const bool delNetworks,
                        const QString& keep,
-                       const QString& debug)
+#ifdef WIN32
+                       const QString& app_path,
+#endif
+                       const QString& debug,
+                       GtpConfigElements *config)
 
     : m_syncMutex(),
     m_gamesThreads(gpus * games),
@@ -54,6 +60,9 @@ Management::Management(const int gpus,
     m_matchGames(0),
     m_gamesPlayed(0),
     m_keepPath(keep),
+#ifdef WIN32
+    m_app_path_(app_path),
+#endif
     m_debugPath(debug),
     m_version(ver),
     m_fallBack(Order::Error),
@@ -61,11 +70,13 @@ Management::Management(const int gpus,
     m_gamesLeft(maxGames),
     m_threadsLeft(gpus * games),
     m_delNetworks(delNetworks),
-    m_lockFile(nullptr) {
+    m_lockFile(nullptr),
+    m_termerr(0),
+    m_config(config) {
 }
 
 void Management::runTuningProcess(const QString &tuneCmdLine) {
-    QTextStream(stdout) << tuneCmdLine << endl;
+    QTextStream(stdout) << "Now run tuning process " << tuneCmdLine << endl;
     QProcess tuneProcess;
     tuneProcess.start(tuneCmdLine);
     tuneProcess.waitForStarted(-1);
@@ -87,16 +98,26 @@ Order Management::getWork(const QFileInfo &file) {
     return o;
 }
 
-void Management::giveAssignments() {
-    sendAllGames();
+Job *Management::giveAssignments() {
 
     //Make the OpenCl tuning before starting the threads
     QTextStream(stdout) << "Starting tuning process, please wait..." << endl;
 
-    Order tuneOrder = getWork(true);
-    QString tuneCmdLine("./leelaz --tune-only -w networks/");
-    tuneCmdLine.append(tuneOrder.parameters()["network"]);
+    QString tuneCmdLine("./leelaz --tune-only ");
+
+    if (m_config->enable_noise)
+        tuneCmdLine.append("-n ");
+    if (!m_config->heuristic)
+        tuneCmdLine.append("--dumbpass ");
+    if (m_config->random_num > 0)
+        tuneCmdLine.append("-m " + QString::number(m_config->random_num) + " ");
+
+    tuneCmdLine.append("-w " + m_config->net_filepath);
+
+    tuneCmdLine.append(" " + m_config->extral_lzparam + " ");
+
     if (m_gpusList.isEmpty()) {
+        QTextStream(stdout) << "--gpulist isempty...\n";
         runTuningProcess(tuneCmdLine);
     } else {
         for (auto i = 0; i < m_gpusList.size(); ++i) {
@@ -107,6 +128,7 @@ void Management::giveAssignments() {
 
     m_start = std::chrono::high_resolution_clock::now();
     QString myGpu;
+    Job *j = nullptr;
     for (int gpu = 0; gpu < m_gpus; ++gpu) {
         for (int game = 0; game < m_games; ++game) {
             int thread_index = gpu * m_games + game;
@@ -123,15 +145,33 @@ void Management::giveAssignments() {
                     this,
                     &Management::getResult,
                     Qt::DirectConnection);
+
             QFileInfo finfo = getNextStored();
             if (!finfo.fileName().isEmpty()) {
                 m_gamesThreads[thread_index]->order(getWork(finfo));
             } else {
-                m_gamesThreads[thread_index]->order(getWork());
+                QMap<QString, QString> t;
+                QString options;
+                options.append(" -v " + QString::number(m_config->loop_visits));
+                options.append(" -r " + QString::number(m_config->resignation_percent));
+                options.append(" -t 1");
+                QTextStream(stdout) << "options: " << options << "\n";
+                t["leelazVer"] = "1.15";
+                t["rndSeed"] = "";
+                t["optHash"] = "ee21";
+                t["options"] = options;
+                t["debug"] = "false";
+                t["network"] = m_config->net_file;
+                Order o(Order::Production, t);
+                m_gamesThreads[thread_index]->order(o);
             }
             m_gamesThreads[thread_index]->start();
+            if (j == nullptr)
+                j = m_gamesThreads[thread_index]->getJob();
         }
     }
+    j->should_sendmsg();
+    return j;
 }
 
 void Management::storeGames() {
@@ -149,31 +189,45 @@ void Management::wait() {
     }
 }
 
+bool Management::terminate_leelaz() {
+    storeGames();
+    if (m_termerr) {
+        return true;
+    }
+
+    return false;
+}
+
 void Management::getResult(Order ord, Result res, int index, int duration) {
     if (res.type() == Result::Error) {
-        exit(1);
+        QTextStream(stdout) << "before sendquit in getreult\n";
+        m_termerr = Result::Error;
+        sendQuit();
+        return;
     }
     m_syncMutex.lock();
     m_gamesPlayed++;
     switch (res.type()) {
     case Result::File:
-        m_selfGames++,
-        uploadData(res.parameters(), ord.parameters());
+        m_selfGames++;
+        archiveFiles(res.parameters()["file"]);
+        cleanupFiles(res.parameters()["file"]);
         printTimingInfo(duration);
         break;
     case Result::Win:
     case Result::Loss:
-        m_matchGames++,
-        uploadResult(res.parameters(), ord.parameters());
+        m_matchGames++;
+        archiveFiles(res.parameters()["file"]);
+        cleanupFiles(res.parameters()["file"]);
         printTimingInfo(duration);
         break;
     }
-    sendAllGames();
     if (m_gamesLeft == 0) {
         m_gamesThreads[index]->doFinish();
         if (m_threadsLeft > 1) {
             --m_threadsLeft;
         } else {
+            QTextStream(stdout) << "before sendquit in if gamesleft 0\n";
             sendQuit();
         }
     } else {
@@ -182,7 +236,20 @@ void Management::getResult(Order ord, Result res, int index, int duration) {
         if (!finfo.fileName().isEmpty()) {
             m_gamesThreads[index]->order(getWork(finfo));
         } else {
-            m_gamesThreads[index]->order(getWork());
+            QMap<QString, QString> t;
+            QString options;
+            options.append(" -v " + QString::number(m_config->loop_visits));
+            options.append(" -r " + QString::number(m_config->resignation_percent));
+            options.append(" -t 1");
+            QTextStream(stdout) << "options: " << options << "\n";
+            t["leelazVer"] = "1.15";
+            t["rndSeed"] = "";
+            t["optHash"] = "ee21";
+            t["options"] = options;
+            t["debug"] = "false";
+            t["network"] = m_config->net_file;
+            Order o(Order::Production, t);
+            m_gamesThreads[index]->order(o);
         }
     }
     m_syncMutex.unlock();
@@ -261,6 +328,7 @@ QString Management::getOptionsString(const QJsonObject &opt, const QString &rnd)
     if (rnd != "") {
         options.append(" -s " + rnd + " ");
     }
+    QTextStream(stdout) << "options: " <<  options << "\n";
     return options;
 }
 
@@ -311,7 +379,7 @@ Order Management::getWorkInternal(bool tuning) {
     prog_cmdline.append(".exe");
 #endif
     prog_cmdline.append(" -s -J");
-    prog_cmdline.append(" http://zero.sjeng.org/get-task/");
+    prog_cmdline.append(" http://" NODE_JS_SERVER_IP "/get-task/");
     if (tuning) {
         prog_cmdline.append("0");
     } else {
@@ -500,6 +568,7 @@ bool Management::networkExists(const QString &name) {
 
 void Management::fetchNetwork(const QString &net) {
     QString name = "networks/" + net;
+    QTextStream(stdout) << "fetchNetwork, name: " << name << endl;
     if (networkExists(name)) {
         return;
     }
@@ -518,7 +587,8 @@ void Management::fetchNetwork(const QString &net) {
     // Use the filename from the server.
     prog_cmdline.append(" -s -J -o " + name + ".gz ");
     prog_cmdline.append(" -w %{filename_effective}");
-    prog_cmdline.append(" http://zero.sjeng.org/" + name + ".gz");
+    prog_cmdline.append(" http://" NODE_JS_SERVER_IP "/" + name + ".gz");
+    QTextStream(stdout) << "fetchNetwork, prog_cmdline: " << prog_cmdline << endl;
 
     QProcess curl;
     curl.start(prog_cmdline);
@@ -581,9 +651,11 @@ void Management::cleanupFiles(const QString &fileName) {
 }
 
 void Management::gzipFile(const QString &fileName) {
-    QString gzipCmd ="gzip";
+
 #ifdef WIN32
-    gzipCmd.append(".exe");
+    QString gzipCmd = m_app_path_ + "gzip.exe";
+#else
+    QString gzipCmd ="gzip";
 #endif
     gzipCmd.append(" " + fileName);
     QProcess::execute(gzipCmd);
@@ -673,6 +745,7 @@ bool Management::sendCurl(const QStringList &lines) {
         ++it;
     }
     QProcess curl;
+    QTextStream(stdout) << "sendCurl, prog_cmdline: " << prog_cmdline << endl;
     curl.start(prog_cmdline);
     curl.waitForFinished(-1);
     if (curl.exitCode()) {
@@ -697,7 +770,7 @@ bool Management::sendCurl(const QStringList &lines) {
 -F options_hash=c2e3
 -F random_seed=0
 -F sgf=@file
-http://zero.sjeng.org/submit-match
+http://NODE_JS_SERVER_IP/submit-match
 */
 
 void Management::uploadResult(const QMap<QString,QString> &r, const QMap<QString,QString> &l) {
@@ -720,7 +793,7 @@ void Management::uploadResult(const QMap<QString,QString> &r, const QMap<QString
     prog_cmdline.append("-F options_hash="+ l["optHash"]);
     prog_cmdline.append("-F random_seed="+ l["rndSeed"]);
     prog_cmdline.append("-F sgf=@"+ r["file"] + ".sgf.gz");
-    prog_cmdline.append("http://zero.sjeng.org/submit-match");
+    prog_cmdline.append("http://" NODE_JS_SERVER_IP "/submit-match");
 
     bool sent = false;
     for (auto retries = 0; retries < MAX_RETRIES; retries++) {
@@ -756,7 +829,7 @@ void Management::uploadResult(const QMap<QString,QString> &r, const QMap<QString
 -F random_seed=1
 -F sgf=@file
 -F trainingdata=@data_file
-http://zero.sjeng.org/submit
+http://NODE_JS_SERVER_IP/submit
 */
 
 void Management::uploadData(const QMap<QString,QString> &r, const QMap<QString,QString> &l) {
@@ -772,7 +845,7 @@ void Management::uploadData(const QMap<QString,QString> &r, const QMap<QString,Q
     prog_cmdline.append("-F random_seed="+ l["rndSeed"]);
     prog_cmdline.append("-F sgf=@" + r["file"] + ".sgf.gz");
     prog_cmdline.append("-F trainingdata=@" + r["file"] + ".txt.0.gz");
-    prog_cmdline.append("http://zero.sjeng.org/submit");
+    prog_cmdline.append("http://" NODE_JS_SERVER_IP "/submit");
 
     bool sent = false;
     for (auto retries = 0; retries < MAX_RETRIES; retries++) {

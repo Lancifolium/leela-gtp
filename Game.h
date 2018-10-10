@@ -28,12 +28,13 @@ class Game : QProcess {
 public:
     Game(const QString& weights,
          const QString& opt,
-         const QString& binary = QString("./leelaz"));
+         const QString& binary = QString("./leelaz"),
+         const QString& trainpath = QString("./data/"));
     ~Game() = default;
     bool gameStart(const VersionTuple& min_version);
     void move();
     bool waitForMove() { return waitReady(); }
-    bool readMove();
+    int readMove();
     bool nextMove();
     bool getScore();
     bool loadSgf(const QString &fileName);
@@ -74,6 +75,7 @@ private:
     QString m_fileName;
     QString m_moveDone;
     QString m_result;
+    QString m_traindatapath;
     bool m_resignation;
     bool m_blackToMove;
     bool m_blackResigned;

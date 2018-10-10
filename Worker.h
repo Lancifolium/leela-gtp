@@ -40,6 +40,7 @@ public:
     void order(Order o);
     void doFinish() { m_job->finish(); m_state.store(FINISHING); }
     void doStore();
+    Job *getJob() { return m_job; }
     void run() override;
 signals:
     void resultReady(Order o, Result r, int index, int duration);

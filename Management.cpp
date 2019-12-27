@@ -20,6 +20,7 @@
 #include <random>
 #include <QDir>
 #include <QThread>
+#include <QTime>
 #include <QList>
 #include <QCryptographicHash>
 #include <QJsonDocument>
@@ -105,12 +106,14 @@ Job *Management::giveAssignments() {
 
     QString tuneCmdLine("./leelaz --tune-only ");
 
+    /*
     if (m_config->enable_noise)
         tuneCmdLine.append("-n ");
     if (!m_config->heuristic)
         tuneCmdLine.append("--dumbpass ");
     if (m_config->random_num > 0)
         tuneCmdLine.append("-m " + QString::number(m_config->random_num) + " ");
+    */
 
     tuneCmdLine.append("-w " + m_config->net_filepath);
 
@@ -152,9 +155,19 @@ Job *Management::giveAssignments() {
             } else {
                 QMap<QString, QString> t;
                 QString options;
+                if (m_config->enable_noise)
+                    options.append(" -n");
+                if (m_config->random_num > 0) {
+                    qsrand(QTime(0, 0, 0).secsTo(QTime::currentTime()));
+                    options.append(" -s " + QString::number(qrand()));
+                }
+                if (!m_config->heuristic)
+                    options.append(" --dumbpass");
+                if (m_config->random_num > 0)
+                    options.append(" -m " + QString::number(m_config->random_num));
                 options.append(" -v " + QString::number(m_config->loop_visits));
                 options.append(" -r " + QString::number(m_config->resignation_percent));
-                options.append(" -t 1");
+                options.append(" -t 1 --noponder");
                 QTextStream(stdout) << "options: " << options << "\n";
                 t["leelazVer"] = "1.15";
                 t["rndSeed"] = "";
@@ -238,9 +251,19 @@ void Management::getResult(Order ord, Result res, int index, int duration) {
         } else {
             QMap<QString, QString> t;
             QString options;
+            if (m_config->enable_noise)
+                options.append(" -n");
+            if (m_config->random_num > 0) {
+                qsrand(QTime(0, 0, 0).secsTo(QTime::currentTime()));
+                options.append(" -s " + QString::number(qrand()));
+            }
+            if (!m_config->heuristic)
+                options.append(" --dumbpass");
+            if (m_config->random_num > 0)
+                options.append(" -m " + QString::number(m_config->random_num));
             options.append(" -v " + QString::number(m_config->loop_visits));
             options.append(" -r " + QString::number(m_config->resignation_percent));
-            options.append(" -t 1");
+            options.append(" -t 1 --noponder");
             QTextStream(stdout) << "options: " << options << "\n";
             t["leelazVer"] = "1.15";
             t["rndSeed"] = "";

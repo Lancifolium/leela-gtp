@@ -87,6 +87,10 @@ void Worker::run() {
         std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
         if (m_state != STORING) {
             emit resultReady(m_todo, res, m_index, gameDuration);
+#if defined(LEELA_GTP)
+            if (res.type() == Result::Error)
+                break;
+#endif
         }
     } while (m_state == RUNNING);
     if (m_state == STORING) {

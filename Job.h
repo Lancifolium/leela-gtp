@@ -25,8 +25,15 @@
 #include <QObject>
 #include <QAtomicInt>
 #include <QTextStream>
+#if defined(LEELA_GTP)
+#include <functional>
+#endif
 class Management;
 using VersionTuple = std::tuple<int, int, int>;
+
+#if defined(LEELA_GTP)
+typedef void (*SendMsgSignal)(int);
+#endif
 
 class Job : public QObject {
     Q_OBJECT
@@ -48,13 +55,28 @@ public:
     void store() {
         m_state.store(STORING);
     }
+#if defined(LEELA_GTP)
+    void connect_sendmessage(const QObject *arecver, const char *amember) {
+        connect(this, SIGNAL(sendmessage(int)),
+                arecver, amember, Qt::DirectConnection);
+    }
+    void should_sendmsg() { m_should_sendmsg = true; }
+#endif
 
 protected:
     QAtomicInt m_state;
     QString m_gpu;
     int m_moves;
     VersionTuple m_leelazMinVersion;
+#if defined(LEELA_GTP)
+    bool m_should_sendmsg;
+#endif
     Management *m_boss;
+
+#if defined(LEELA_GTP)
+signals:
+    void sendmessage(int);
+#endif
 };
 
 

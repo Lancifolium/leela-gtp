@@ -55,14 +55,22 @@ public:
 
 class Game : QProcess {
 public:
+#if defined(LEELA_GTP)
+    Game(const Engine& engine, const QString& trainpath = QString("./data/"));
+#else
     Game(const Engine& engine);
+#endif
     ~Game() = default;
     bool gameStart(const VersionTuple& min_version,
                    const QString &sgf = QString(),
                    const int moves = 0);
     void move();
     bool waitForMove() { return waitReady(); }
+#if defined(LEELA_GTP)
+    int readMove();
+#else
     bool readMove();
+#endif
     bool nextMove();
     bool getScore();
     bool loadSgf(const QString &fileName);
@@ -107,6 +115,9 @@ private:
     bool m_blackToMove;
     bool m_blackResigned;
     int m_passes;
+#if defined(LEELA_GTP)
+    QString m_traindatapath;
+#endif
     int m_moveNum;
     bool sendGtpCommand(QString cmd);
     void checkVersion(const VersionTuple &min_version);

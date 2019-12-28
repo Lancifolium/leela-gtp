@@ -28,6 +28,9 @@
 Job::Job(QString gpu, Management *parent) :
     m_state(RUNNING),
     m_gpu(gpu),
+#if defined(LEELA_GTP)
+    m_should_sendmsg(false),
+#endif
     m_boss(parent)
 {
 }
@@ -69,6 +72,7 @@ Result ProductionJob::execute(){
     Result res(Result::Error);
     Game game(m_engine);
     if (!game.gameStart(m_leelazMinVersion, m_sgf, m_moves)) {
+        QTextStream(stdout) << "before return res in projub\n";
         return res;
     }
     if (!m_sgf.isEmpty()) {
@@ -78,12 +82,25 @@ Result ProductionJob::execute(){
             QFile::remove(m_sgf + ".train");
         }
     }
+#if defined(LEELA_GTP)
+    if (m_should_sendmsg) {
+        emit sendmessage(100000); // init
+    }
+#endif
     do {
         game.move();
         if (!game.waitForMove()) {
             return res;
         }
+#if defined(LEELA_GTP)
+        if (m_should_sendmsg) {
+            emit sendmessage(game.readMove());
+        } else {
+            game.readMove();
+        }
+#else
         game.readMove();
+#endif
         m_boss->incMoves();
     } while (game.nextMove() && m_state.load() == RUNNING);
     switch (m_state.load()) {
@@ -118,7 +135,14 @@ Result ProductionJob::execute(){
 
 void ProductionJob::init(const Order &o) {
     Job::init(o);
+#if defined(LEELA_GTP)
+    if (o.parameters()["use_local_network"] == "true")
+        m_engine.m_network = m_boss->gtp_config()->net_filepath;
+    else
+        m_engine.m_network = "networks/" + o.parameters()["network"] + ".gz";
+#else
     m_engine.m_network = "networks/" + o.parameters()["network"] + ".gz";
+#endif
     m_engine.m_options = " " + o.parameters()["options"] + m_gpu + " -g -q -w ";
     if (o.parameters().contains("gtpCommands")) {
         m_engine.m_commands = o.parameters()["gtpCommands"].split(",");
@@ -199,12 +223,26 @@ Result ValidationJob::execute(){
 
 void ValidationJob::init(const Order &o) {
     Job::init(o);
+#if defined(LEELA_GTP)
+    if (o.parameters()["use_local_network"] == "true")
+        m_engineFirst.m_network = m_boss->gtp_config()->net_filepath;
+    else
+        m_engineFirst.m_network = "networks/" + o.parameters()["firstNet"] + ".gz";
+#else
     m_engineFirst.m_network = "networks/" + o.parameters()["firstNet"] + ".gz";
+#endif
     m_engineFirst.m_options = " " + o.parameters()["options"] + m_gpu + " -g -q -w ";
     if (o.parameters().contains("gtpCommands")) {
         m_engineFirst.m_commands = o.parameters()["gtpCommands"].split(",");
     }
+#if defined(LEELA_GTP)
+    if (o.parameters()["use_local_network"] == "true")
+        m_engineFirst.m_network = m_boss->gtp_config()->net_component_filepath;
+    else
+        m_engineSecond.m_network = "networks/" + o.parameters()["secondNet"] + ".gz";
+#else
     m_engineSecond.m_network = "networks/" + o.parameters()["secondNet"] + ".gz";
+#endif
     m_engineSecond.m_options = " " + o.parameters()["optionsSecond"] + m_gpu + " -g -q -w ";
     if (o.parameters().contains("gtpCommandsSecond")) {
         m_engineSecond.m_commands = o.parameters()["gtpCommandsSecond"].split(",");

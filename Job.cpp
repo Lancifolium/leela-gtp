@@ -29,8 +29,10 @@ Job::Job(QString gpu, Management *parent) :
     m_state(RUNNING),
     m_option(""),
   m_gpu(gpu),
-  m_boss(parent),
-  m_should_sendmsg(false)
+#if defined(LEELA_GTP)
+  m_should_sendmsg(false),
+#endif
+  m_boss(parent)
 {
 }
 
@@ -68,8 +70,11 @@ Job(gpu, parent)
 
 Result ProductionJob::execute(){
     Result res(Result::Error);
+#if defined(LEELA_GTP)
     Game game(m_boss->gtp_config()->net_filepath, m_option);
-    //Game game("networks/" + m_network, m_option);
+#else
+    Game game("networks/" + m_network, m_option);
+#endif
     if (!game.gameStart(m_leelazMinVersion)) {
         QTextStream(stdout) << "before return res in projub\n";
         return res;
@@ -81,19 +86,25 @@ Result ProductionJob::execute(){
         QFile::remove(m_sgf + ".sgf");
         QFile::remove(m_sgf + ".train");
     }
+#if defined(LEELA_GTP)
     if (m_should_sendmsg) {
         emit sendmessage(100000); // init
     }
+#endif
     do {
         game.move();
         if (!game.waitForMove()) {
             return res;
         }
+#if defined(LEELA_GTP)
         if (m_should_sendmsg) {
             emit sendmessage(game.readMove());
         } else {
             game.readMove();
         }
+#else
+        game.readMove();
+#endif
         m_boss->incMoves();
     } while (game.nextMove() && m_state.load() == RUNNING);
     switch (m_state.load()) {
@@ -141,7 +152,11 @@ void ProductionJob::init(const Order &o) {
 
 Result ValidationJob::execute(){
     Result res(Result::Error);
+#if defined(LEELA_GTP)
     Game first(m_boss->gtp_config()->net_filepath,  m_option);
+#else
+    Game first("networks/" + m_firstNet,  m_option);
+#endif
     if (!first.gameStart(m_leelazMinVersion)) {
         return res;
     }
@@ -150,7 +165,11 @@ Result ValidationJob::execute(){
         first.setMovesCount(m_moves);
         QFile::remove(m_sgfFirst + ".sgf");
     }
+#if defined(LEELA_GTP)
     Game second(m_boss->gtp_config()->net_component_filepath, m_option);
+#else
+    Game second("networks/" + m_secondNet, m_option);
+#endif
     if (!second.gameStart(m_leelazMinVersion)) {
         return res;
     }

@@ -251,11 +251,11 @@ int LeelaGTP::_run() {
     config.run_maxgames -= 1;
     QTextStream(stdout) << config.run_maxgames << " max ganesm\n";
     boss = new Management(1, config.gpu_games, QStringList(), AUTOGTP_VERSION,
-                                      config.run_maxgames, false, config.keepSgf ? config.sgf_path : QString(),
+                                      config.run_maxgames, false, config.keepSgf ? config.sgf_path : QString(), &config,
 #ifdef WIN32
                                       this->app->applicationDirPath(),
 #endif
-                                      "./data/", &config);
+                                      "./data/");
 
     //QTextStream(stdout) << "before 1st connect\n";
     QTimer *timer = new QTimer();
@@ -392,10 +392,3 @@ void LeelaGTP::paintEvent(QPaintEvent *) {
     drawing_board();
 }
 
-
-int main(int argc, char *argv[]) {
-    QApplication a(argc, argv);
-    LeelaGTP w(&a);
-    w.show();
-    return a.exec();
-}

@@ -17,7 +17,10 @@ RC_FILE  += LeelaGTP/leelagtp.rc
 
 TEMPLATE = app
 
-SOURCES += Game.cpp \
+DEFINES += LEELA_GTP
+
+SOURCES += main.cpp \
+    Game.cpp \
     Worker.cpp \
     Order.cpp \
     Job.cpp \

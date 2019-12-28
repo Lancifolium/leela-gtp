@@ -29,7 +29,9 @@
 #include <chrono>
 #include <stdexcept>
 #include "Worker.h"
+#if defined(LEELA_GTP)
 #include "LeelaGTP/GTPConfig.h"
+#endif
 
 constexpr int AUTOGTP_VERSION = 16;
 
@@ -43,17 +45,25 @@ public:
                const int maxGame,
                const bool delNetworks,
                const QString& keep,
+#if defined(LEELA_GTP)
+               GtpConfigElements *config,
 #ifdef WIN32
                const QString& app_path,
-#endif
-               const QString& debug,
-               GtpConfigElements *config);
+#endif  // ifdef WIN32
+#endif  // if defined(LEELA_GTP)
+               const QString& debug);
     ~Management() = default;
+#if defined(LEELA_GTP)
     Job *giveAssignments();
+#else
+    void giveAssignments();
+#endif
     void incMoves() { m_movesMade++; }
     void wait();
+#if defined(LEELA_GTP)
     bool terminate_leelaz();
     GtpConfigElements *gtp_config() { return m_config; };
+#endif
 signals:
     void sendQuit();
 public slots:
@@ -78,6 +88,13 @@ private:
     int m_gamesPlayed;
     QAtomicInt m_movesMade;
     QString m_keepPath;
+#if defined(LEELA_GTP)
+    int m_termerr;
+    GtpConfigElements *m_config;
+#ifdef WIN32
+    QString m_app_path_;
+#endif  // ifdef WIN32
+#endif  // if defined(LEELA_GTP)
     QString m_debugPath;
     int m_version;
     std::chrono::high_resolution_clock::time_point m_start;
@@ -89,11 +106,6 @@ private:
     int m_threadsLeft;
     bool m_delNetworks;
     QLockFile *m_lockFile;
-    int m_termerr;
-    GtpConfigElements *m_config;
-#ifdef WIN32
-    QString m_app_path_;
-#endif
 
     Order getWorkInternal(bool tuning);
     Order getWork(bool tuning = false);

@@ -29,7 +29,7 @@
 #include <chrono>
 #include <stdexcept>
 #include "Worker.h"
-#include "GTPConfig.h"
+#include "LeelaGTP/GTPConfig.h"
 
 constexpr int AUTOGTP_VERSION = 16;
 

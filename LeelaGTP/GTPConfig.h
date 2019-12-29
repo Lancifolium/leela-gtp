@@ -86,7 +86,7 @@ struct GtpConfigElements {
         net_component_filepath = "./networks/component_weights.txt";
         net_component_file = "component_weights.txt";
 
-        extral_lzparam = "";
+        extral_lzparam = "--target-komi 0.5 --tg-auto-pn --neg";
 
         // Load training data
         training_data_path = "./data/";

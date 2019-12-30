@@ -30,6 +30,7 @@ GtpConfig::GtpConfig(QWidget *parent, GtpConfigElements *m_config) :
     this->setWindowTitle("Leela GTP further configurations");
     this->setFixedSize(600, 600);
 
+
     this->tmplabel1 = new QLabel("前几步更随机：", this);
     this->tmplabel1->setGeometry(60, 66, 150, 24);
     this->butt_random = new QSpinBox(this);
@@ -93,11 +94,20 @@ GtpConfig::GtpConfig(QWidget *parent, GtpConfigElements *m_config) :
 
     this->butt_trainingdatapath = new QPushButton("打开训练文件目录", this);
     this->butt_trainingdatapath->setGeometry(60, 420, 100, 24);
-    connect(butt_trainingdatapath, SIGNAL(clicked(bool)), this, SLOT(on_loadtrainingdata()));
+    connect(butt_trainingdatapath, SIGNAL(clicked(bool)), this, SLOT(on_trainingdatapath()));
     this->show_trainingdatapath =
             new QLabel("默認目录：" + config.training_data_path, this);
     this->show_trainingdatapath->setGeometry(176, 420, 360, 24);
 
+    this->butt_loaddata = new QCheckBox("是否加载保存数据文件", this);
+    this->butt_loaddata->setGeometry(60, 450, 360, 24);
+    this->butt_loaddata->setChecked(config.load_training_data);
+    connect(butt_loaddata, SIGNAL(toggled(bool)), this, SLOT(on_loadTrainingData()));
+
+    this->butt_loadsgf = new QCheckBox("是否加载保存棋谱文件", this);
+    this->butt_loadsgf->setGeometry(60, 480, 360, 24);
+    this->butt_loadsgf->setChecked(config.load_kept_sgfs);
+    connect(butt_loadsgf, SIGNAL(toggled(bool)), this, SLOT(on_loadSgf()));
 
     this->butt_okay = new QPushButton("确定", this);
     this->butt_okay->setGeometry(60, 510, 84, 24);
@@ -155,9 +165,23 @@ void GtpConfig::on_compnetfile() {
     this->show_compnetfile->setText(config.net_component_filepath);
 }
 
-void GtpConfig::on_loadtrainingdata() {
+void GtpConfig::on_trainingdatapath() {
     config.training_data_path = QFileDialog::getExistingDirectory(this, tr("训练文件所在目录"), ".");
     show_trainingdatapath->setText(config.training_data_path);
+}
+
+void GtpConfig::on_loadtrainingdata() {
+    if (butt_loaddata->isChecked())
+        config.load_training_data = true;
+    else
+        config.load_training_data = false;
+}
+
+void GtpConfig::on_loadsgf() {
+    if (butt_loadsgf->isChecked())
+        config.load_kept_sgfs = true;
+    else
+        config.load_kept_sgfs = false;
 }
 
 void GtpConfig::on_heuristic() {

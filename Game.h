@@ -25,6 +25,10 @@
 
 using VersionTuple = std::tuple<int, int, int>;
 
+#if defined(LEELA_GTP)
+class Management;
+#endif
+
 class Engine {
 public:
     Engine(const QString& network,
@@ -55,13 +59,12 @@ public:
 
 class Game : QProcess {
 public:
-#if defined(LEELA_GTP)
-    Game(const Engine& engine, const QString& trainpath = QString("./data/"));
-#else
     Game(const Engine& engine);
-#endif
     ~Game() = default;
     bool gameStart(const VersionTuple& min_version,
+#if defined(LEELA_GTP)
+                   Management* boss,
+#endif
                    const QString &sgf = QString(),
                    const int moves = 0);
     void move();
@@ -115,9 +118,6 @@ private:
     bool m_blackToMove;
     bool m_blackResigned;
     int m_passes;
-#if defined(LEELA_GTP)
-    QString m_traindatapath;
-#endif
     int m_moveNum;
     bool sendGtpCommand(QString cmd);
     void checkVersion(const VersionTuple &min_version);

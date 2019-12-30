@@ -23,14 +23,11 @@
 #include <QFileInfo>
 #if defined(LEELA_GTP)
 #include <QDir>
+#include "Management.h"
 #endif
 #include "Game.h"
 
-#if defined(LEELA_GTP)
-Game::Game(const Engine& engine, const QString& trainpath) :
-#else
 Game::Game(const Engine& engine) :
-#endif
     QProcess(),
     m_engine(engine),
     m_isHandicap(false),
@@ -42,9 +39,6 @@ Game::Game(const Engine& engine) :
 #endif
     m_blackResigned(false),
     m_passes(0),
-#if defined(LEELA_GTP)
-    m_traindatapath(trainpath),
-#endif
     m_moveNum(0)
 {
     m_fileName = QUuid::createUuid().toRfc4122().toHex();
@@ -200,6 +194,9 @@ void Game::checkVersion(const VersionTuple &min_version) {
 }
 
 bool Game::gameStart(const VersionTuple &min_version,
+#if defined(LEELA_GTP)
+                     Management *boss,
+#endif
                      const QString &sgf,
                      const int moves) {
     start(m_engine.getCmdLine());
@@ -212,15 +209,32 @@ bool Game::gameStart(const VersionTuple &min_version,
     checkVersion(min_version);
     QTextStream(stdout) << "Engine has started." << endl;
 #if defined(LEELA_GTP)
-    QDir dir(m_traindatapath);
-    QStringList trainfilter;
-    trainfilter << "*.0.gz" << "*.train";
-    QStringList trainfiles = dir.entryList(trainfilter, QDir::Files | QDir::Readable, QDir::Name);
-    for (int tmpi = 0; tmpi < trainfiles.size(); tmpi++) {
-        sendGtpCommand(qPrintable("load_training " + m_traindatapath + trainfiles[tmpi]));
-        //QTextStream(stdout) << m_traindatapath + trainfiles[tmpi] << "\n";
+    if (boss->gtp_config()->load_training_data) {
+        QDir dir(boss->gtp_config()->training_data_path);
+        QStringList trainfilter;
+        trainfilter << "*.0.gz" << "*.train";
+        QStringList trainfiles = dir.entryList(trainfilter, QDir::Files | QDir::Readable, QDir::Name);
+        for (int tmpi = 0; tmpi < trainfiles.size(); tmpi++) {
+            QString load_training("load_training " +
+                                  boss->gtp_config()->training_data_path +
+                                  trainfiles[tmpi]);
+            sendGtpCommand(qPrintable(load_training));
+        }
+        QTextStream(stdout) << "load " << trainfiles.size() << " training files\n";
     }
-    QTextStream(stdout) << "load " << trainfiles.size() << " training files\n";
+    if (boss->gtp_config()->load_kept_sgfs) {
+        QDir dir(boss->gtp_config()->sgf_path);
+        QStringList sfgfilter;
+        sfgfilter << "*.sgf";
+        QStringList sfgfiles = dir.entryList(sfgfilter, QDir::Files | QDir::Readable, QDir::Name);
+        for (int tmpi = 0; tmpi < sfgfiles.size(); tmpi++) {
+            QString load_sgfs("load_training " +
+                               boss->gtp_config()->sgf_path +
+                               sfgfiles[tmpi]);
+            sendGtpCommand(qPrintable(load_sgfs));
+        }
+        QTextStream(stdout) << "load " << sfgfiles.size() << " sgf files\n";
+    }
 #endif
     //If there is an sgf file to start playing from then it will contain
     //whether there is handicap in use. If there is no sgf file then instead,

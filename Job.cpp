@@ -71,7 +71,11 @@ WaitJob::WaitJob(QString gpu, Management *parent) :
 Result ProductionJob::execute(){
     Result res(Result::Error);
     Game game(m_engine);
+#if defined(LEELA_GTP)
+    if (!game.gameStart(m_leelazMinVersion, m_boss, m_sgf, m_moves)) {
+#else
     if (!game.gameStart(m_leelazMinVersion, m_sgf, m_moves)) {
+#endif
         QTextStream(stdout) << "before return res in projub\n";
         return res;
     }
@@ -156,11 +160,19 @@ void ProductionJob::init(const Order &o) {
 Result ValidationJob::execute(){
     Result res(Result::Error);
     Game first(m_engineFirst);
+#if defined(LEELA_GTP)
+    if (!first.gameStart(m_leelazMinVersion, m_boss, m_sgf, m_moves)) {
+#else
     if (!first.gameStart(m_leelazMinVersion, m_sgf, m_moves)) {
+#endif
         return res;
     }
     Game second(m_engineSecond);
+#if defined(LEELA_GTP)
+    if (!second.gameStart(m_leelazMinVersion, m_boss, m_sgf, m_moves)) {
+#else
     if (!second.gameStart(m_leelazMinVersion, m_sgf, m_moves)) {
+#endif
         return res;
     }
     if (!m_sgf.isEmpty()) {

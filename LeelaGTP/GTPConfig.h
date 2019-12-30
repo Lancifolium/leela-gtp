@@ -47,6 +47,10 @@ struct GtpConfigElements {
     // load training data from directory
     QString training_data_path;
 
+    // load training data or kept sgf files
+    bool load_training_data;
+    bool load_kept_sgfs;
+
     // Save running games after the timeout (in minutes) is passed and then exit.
     int run_timeout;
 
@@ -91,6 +95,10 @@ struct GtpConfigElements {
         // Load training data
         training_data_path = "./data/";
 
+        // load training data or kept sgf files
+        load_training_data = false;
+        load_kept_sgfs = true;
+
         run_timeout = 0;
         run_maxgames = 0;
         random_num = 0;
@@ -116,6 +124,8 @@ struct GtpConfigElements {
         c->extral_lzparam = extral_lzparam;
 
         c->training_data_path = training_data_path;
+        c->load_training_data = load_training_data;
+        c->load_kept_sgfs = load_kept_sgfs;
 
         //c->run_timeout = run_timeout;
         //c->run_maxgames = run_maxgames;
@@ -149,6 +159,8 @@ private slots:
     //void on_loopvisits();
     void on_validation();
     void on_compnetfile();
+    void on_trainingdatapath();
+    void on_loadsgf();
     void on_loadtrainingdata();
     void on_heuristic();
     void on_exlzparam();
@@ -192,6 +204,7 @@ private:
 
     //
     QLabel *tmplabel1, *tmplabel2, *tmplabel3, *tmplabel4, *tmplabel5;
+    QCheckBox *butt_loadsgf, *butt_loaddata;
 
     struct GtpConfigElements config;
     struct GtpConfigElements *main_config;
